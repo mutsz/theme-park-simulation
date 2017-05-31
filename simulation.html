@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title></title>
+<script src="https://d3js.org/d3.v4.js"></script>
+<script src="linked-node-class.js"></script>
+<script src="sorted-list-class.js"></script>
+<script src="FIFO-queue-class.js"></script>
+<script src="random.js"></script>
+<!-- simulation specific -->
+<script src="constants.js"></script>
+<script src="event-class.js"></script>
+<script src="rider-class.js"></script>
+<script src="simulation-parameters-class.js"></script>
+<script src="ride-class.js"></script>
+<script type="text/javascript">
+
+// default to 32400 (9 hrs)
+var closingTime = 32400;
+// take input and * 60
+var riderArvMean = 1 * 60;
+var riderArvStddev = 0.5 * 60;
+var carArvMin = 10 * 60;
+var carArvMax = 11 * 60;
+var pctOfSFP = 35;
+var pctOfFP = 35;
+var idealNumSFP = 8;
+var idealNumFP = 8;
+
+var parameters = new SimulationParametersClass(
+					 closingTime,
+					 riderArvMean,
+					 riderArvStddev, 
+					 carArvMin,
+					 carArvMax,
+					 pctOfSFP,
+					 pctOfFP,
+					 idealNumSFP,
+					 idealNumFP
+					 );
+
+var theRide = new RideClass();
+theRide.run(parameters);
+
+</script>
+<style type="text/css">
+body, html {
+    font-family: sans-serif;
+    font-size: 10px;
+    margin: 0;
+    padding: 0;
+}
+div.tooltip {	
+    position: absolute;
+    text-align: center;
+    width: 60px;
+    height: 28px;
+    padding: 2px;
+    font: 12px sans-serif;
+    background: lightsteelblue;
+    border: 0px;
+    pointer-events: none;			
+}
+</style>
+</head>
+
+<body>
+</body>
+
+<script type="text/javascript">
+var svgContainer = d3.select("body")
+.append("svg")
+.attr("width", 500)
+.attr("height", 500);
+
+var tooltipDiv = d3.select("body").append("div")	
+.attr("class", "tooltip")				
+.style("opacity", 0);
+
+// 最快一分鐘跑 0.25 秒
+// 普通一分鐘跑 0.5 秒
+var timelist = [{time: 0, type: "RIDER", rider: {queue: "SFP", id: 1}},
+				{time: 1000, type: "RIDER", rider: {queue: "FP", id: 2}},
+				{time: 2000, type: "RIDER", rider: {queue: "SFP", id: 3}},
+				{time: 3000, type: "RIDER", rider: {queue: "SFP", id: 4}},
+				{time: 4000, type: "RIDER", rider: {queue: "FP", id: 5}},
+				{time: 5000, type: "RIDER", rider: {queue: "SFP", id: 6}},
+				{time: 6000, type: "RIDER", rider: {queue: "SFP", id: 7}},
+				{time: 7000, type: "RIDER", rider: {queue: "FP", id: 8}},
+				{time: 8000, type: "RIDER", rider: {queue: "SFP", id: 9}},
+				{time: 9000, type: "RIDER", rider: {queue: "SFP", id: 10}},
+				{time: 10000, type: "RIDER", rider: {queue: "FP", id: 11}},
+				{time: 11000, type: "RIDER", rider: {queue: "SFP", id: 12}},
+				{time: 12000, type: "RIDER", rider: {queue: "SFP", id: 13}},
+				{time: 13000, type: "RIDER", rider: {queue: "FP", id: 14}},
+				{time: 14000, type: "RIDER", rider: {queue: "SFP", id: 15}},
+				{time: 15000, type: "CAR", riders: [{queue: "SFP", id: 1},
+													{queue: "SFP", id: 3},
+													{queue: "FP", id: 2},
+													{queue: "FP", id: 5},
+													{queue: "FP", id: 8},
+													{queue: "FP", id: 11}]},
+				{time: 16000, type: "RIDER", rider: {queue: "FP", id: 16}},
+				{time: 17000, type: "RIDER", rider: {queue: "FP", id: 17}},
+				{time: 18000, type: "RIDER", rider: {queue: "SFP", id: 18}},
+				{time: 22000, type: "CAR", riders: [{queue: "SFP", id: 4},
+													{queue: "SFP", id: 6},
+													{queue: "SFP", id: 7},
+													{queue: "FP", id: 5}]} // how many empty
+				];
+// var timelist = theRide.getTimeList();
+console.log(timelist);
+var time = 0;
+
+var length = {SFP: 0, FP: 0, STD: 0};
+var constants = {
+	SFP: {yPos: 30, color: "red"},
+	FP: {yPos: 90, color: "blue"},
+	STD: {yPos: 150, color: "green"},
+};
+var dequeueNum = {SFP: 0, FP: 0, STD: 0};
+var alreadyReported = [];
+var tooltip = {id: "", time: 0};
+
+function myTimer() {
+    console.log(' each 1 second...');
+}
+// var myVar = setInterval(function(){ myTimer() }, 1000);
+
+window.APP = window.APP || {};
+
+APP.init = function() {
+    APP.setup.initObjects();
+    APP.setup.initSpeedInput();
+    APP.setup.addListeners();
+    APP.play();
+};
+
+APP.pause = function() {
+    window.cancelAnimationFrame(APP.animationFrameLoop);
+    APP.isRunning = false;
+};
+
+APP.play = function() {
+    if (!APP.isRunning) {
+        APP.then = Date.now() - APP.startTime;
+        APP.core.frame();
+        APP.isRunning = true;
+    }
+};
+
+APP.core = {
+    frame: function() {
+        APP.now = (Date.now() - APP.startTime);
+        APP.delta = (Date.now() - APP.then) / 1000; // Converts to seconds (optional)
+        APP.then = Date.now();
+
+        if (timelist.length == 0) {
+        	window.cancelAnimationFrame(APP.animationFrameLoop);
+        	APP.isRunning = false;
+        	// clearInterval(myVar);
+        	return;
+        }
+
+        if (APP.now * 10 >= timelist[0].time) {
+        	APP.core.update(timelist[0]);
+        	timelist.shift();
+        }
+
+        if (APP.now >= time) {
+        	tooltipDiv.html("#" + tooltip.id + "<br/>"  + (APP.now * 10 - tooltip.time) / 10);
+        	var riders = document.getElementsByClassName("rider");
+        	for (var i = 0, il = riders.length; i < il; ++i) {
+        		if ((APP.now - riders[i].data.time) > 10000) {
+        			if (alreadyReported.indexOf(riders[i].data.rider.queue + riders[i].data.rider.id) == -1) {
+        				console.log(riders[i].data.rider.id);
+        				alreadyReported.push(riders[i].data.rider.queue + riders[i].data.rider.id);
+        			}
+        		}
+        	}
+        	for (var i = 0, il = alreadyReported.length; i < il; ++i) {
+        		svgContainer.select("#" + alreadyReported[i])
+        		.select("circle")
+        		.attr("fill", "yellow");
+        	}
+        	time += 1000;
+        }
+
+        APP.animationFrameLoop = window.requestAnimationFrame(APP.core.frame);
+    },
+
+    update: function(event) {
+       	if (event.type == "RIDER") {
+       		svgContainer.append("g")
+        	.attr("class", event.rider.queue)
+        	.attr("id", event.rider.queue + event.rider.id)
+        	.attr("transform", "translate(-5, " + constants[event.rider.queue].yPos + ")")
+        	.transition()
+        	.duration(1000)
+        	.attr("transform", "translate(" + (450 - length[event.rider.queue] * 15) + ", " + constants[event.rider.queue].yPos + ")");
+
+        	var rider = svgContainer.select("#" + event.rider.queue + event.rider.id);
+        	rider.append("circle")
+        	.property("data", event)
+        	.attr("class", "rider")
+        	.attr("r", 5)
+        	.attr("fill", constants[event.rider.queue].color)
+        	.on("mouseover", function() {
+        		tooltip.id = event.rider.id;
+				tooltip.time = event.time;
+	            tooltipDiv.style("opacity", 1);
+	            tooltipDiv.html("#" + tooltip.id + "<br/>"  + (APP.now * 10 - tooltip.time) / 10)
+	            .style("left", (d3.event.pageX) + "px")
+	            .style("top", (d3.event.pageY - 28) + "px");
+	        })
+	        .on("mouseout", function(d) {
+	            tooltipDiv.style("opacity", 0);
+	        });
+
+        	// rider.append("text")
+        	// .attr("dx", -5)
+        	// .attr("dy", 2)
+        	// .text(event.rider.id);
+
+            length[event.rider.queue]++;
+       	} else if (event.type == "CAR") {
+       		svgContainer.append("g")
+       		.attr("id", "car")
+       		.attr("transform", "translate(470, -100)")
+       		.transition()
+            .duration(1000)
+            .attr("transform", "translate(470, 15)")
+            .transition()
+            .duration(1000)
+            // delay 500 (first rider duration) + every duration of the rest riders
+            // equals to 500 * event.riders.length
+            // 500 * 20 + 1000 + 1000 = 12000 (minimum interval of car arrival) = 12 sec = 0.2 min
+            .delay(500 + (event.riders.length - 1) * 500)
+            .attr("transform", "translate(470, 500)")
+            .remove();
+
+        	svgContainer.select("#car")
+        	.append("rect")
+            .attr("width", 30)
+            .attr("height", 100);
+
+            for (var r = 0, rl = event.riders.length; r < rl; ++r) {
+        		svgContainer.selectAll("." + event.riders[r].queue)
+        		.transition()
+        		.duration(500)
+        		.delay(1000 + r * 500)
+        		.attr("transform", function(d, i) {
+        			return "translate(" + ((450 - i * 15) + 15 * (dequeueNum[event.riders[r].queue] + 1)) + ", " + constants[event.riders[r].queue].yPos + ")";
+        		});
+
+        		svgContainer.select("#" + event.riders[r].queue + event.riders[r].id)
+        		.transition()
+        		.duration(0)
+        		.delay(1500 + r * 500)
+            	.attr("fill-opacity", 0)
+            	.on("end", function() { 
+            		this.remove();
+            	});
+
+            	var circleGroup = svgContainer.select("#car")
+            	.append("g")
+            	.attr("transform", function() {
+            		var x, y;
+            		if (r % 2 == 0) {
+            			x = 475 - 470;
+            		} else {
+            			x = 495 - 470;
+            		}
+            		y = 115 - 15 - parseInt(r / 2) * 15 - 15;
+            		return "translate(" + x + ", " + y + ")";
+            	});
+            	circleGroup.append("circle")
+            	.attr("r", 5)
+            	.attr("fill-opacity", 0)
+            	.attr("fill", constants[event.riders[r].queue].color)
+            	.transition()
+            	.duration(0)
+            	.delay(1500 + r * 500)
+            	.attr("fill-opacity", 1);
+            	circleGroup.append("text")
+            	.attr("dx", -5)
+	        	.attr("dy", 2)
+	        	.text(event.riders[r].id);
+
+            	dequeueNum[event.riders[r].queue]++;
+            	length[event.riders[r].queue]--;
+            	
+            }
+
+            dequeueNum = {SFP: 0, FP: 0, STD: 0};
+        }
+    }
+};
+
+APP.setup = {
+    addListeners: function() {
+        // Makes demo responsive for small screens
+        // window.addEventListener('resize', APP.workers.calculateBulletStart);
+    },
+
+    initSpeedInput: function() {
+        // APP.speedInput = document.getElementById('speed-input');
+        // APP.speedInput.value = APP.bullet.speed;
+        // APP.speedInput.addEventListener('keyup', APP.workers.updateSpeed);
+        // APP.speedInput.addEventListener('change', APP.workers.updateSpeed);
+    },
+
+    initObjects: function() {
+        // APP.bullet = {
+        //     element: document.getElementById('css-bullet'),
+        //     x: 460,
+        //     y: 114,
+        //     height: 56,
+        //     width: 64,
+        //     startX: 460,
+        //     speed: 100 // pixels per second
+        // };
+
+        // APP.cannon = {
+        //     element: document.getElementById('css-cannon'),
+        //     x: 460,
+        //     y: 110,
+        //     height: 128,
+        //     width: 64
+        // };
+
+        // // Update start X based on screen size
+        // APP.workers.calculateBulletStart();
+        // APP.bullet.x = APP.bullet.startX;
+
+        // APP.framerateDisplay = document.getElementById('framerate');
+        APP.timer = 0;
+
+        APP.startTime = Date.now();
+    }
+};
+
+APP.init();
+</script>
+
+</html>
